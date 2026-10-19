@@ -10,8 +10,10 @@ METHODS = {
     'BFS': ('basic_search', 'breadth_first_search'),
     'GBFS': ('inform_search', 'greedy_best_first_search'),
     'AS': ('inform_search', 'astar_search'),
-    'CUS1': ('custom_search', 'iterative_lengthening_search'),
-    'CUS2': ('custom_search', 'ida_star_moves'),
+    #'CUS1': ('custom_search', 'iterative_lengthening_search'),
+    #'CUS2': ('custom_search', 'ida_star_moves'),
+    'CUS1': ('custom_search', 'cus1_search'),
+    'CUS2': ('custom_search', 'cus2_search'),
 }
 
 
