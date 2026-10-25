@@ -15,12 +15,8 @@ from route_problem import RouteProblem, read_problem
 from search import METHODS, run_search
 
 TEST_FILES = [
-    'PathFinder-test-1.txt',
-    'test_11_large_graph.txt',
-    'test_12_long_route.txt',
-    'test_13_many_branches.txt',
-    'test_14_merging_paths.txt',
-    'test_15_difficult_combo.txt',
+    'test_case/PathFinder-test-1.txt',
+    *(f'test_case/testcase{number}.txt' for number in range(1, 17)),
 ]
 
 
@@ -95,7 +91,7 @@ def verify_problem(problem, name):
 def main():
     successes = 0
     for filename in TEST_FILES:
-        problem = read_problem(Path(__file__).with_name(filename))
+        problem = read_problem(Path(__file__).parent / filename)
         successes += verify_problem(problem, filename)
     # Extra scenarios not dependent on external files.
     scenarios = [

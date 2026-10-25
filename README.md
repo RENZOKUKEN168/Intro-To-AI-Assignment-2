@@ -94,18 +94,18 @@ Edges are **directed**: `(1,2): 4` permits travel from node 1 to node 2, but not
 | `basic_search.py` | DFS and BFS implementations |
 | `inform_search.py` | GBFS and A* implementations |
 | `custom_search.py` | CUS1 (IDDFS) and CUS2 (IDA*) implementations |
-| `test_case/` | Assignment sample and basic/informed graph test cases |
-| `test_11_large_graph.txt` through `test_15_difficult_combo.txt` | Five additional custom-search test scenarios |
-| `test_custom_integration.py` | Automated verification of CUS1 and CUS2 on the five custom test cases |
+| `test_case/` | Assignment sample and all 16 numbered graph test cases (`testcase1.txt`–`testcase16.txt`) |
+| `test_member3.py` | Automated CUS1/CUS2 checks on `testcase12.txt`–`testcase16.txt` |
+| `verify_project.py` | Runs all six algorithms on the 17 graph files and two built-in edge cases |
 
 ## Testing
 
-The project includes **17 graph input files**: the assignment sample, six basic-search cases, five informed-search cases, and five custom-search cases. The test scenarios cover directed connections, cycles, branching, multiple destinations, unreachable goals, varying edge weights, and larger graphs.
+The project includes **17 graph input files**: `PathFinder-test-1.txt` and `testcase1.txt` through `testcase16.txt`. The test scenarios cover directed connections, cycles, branching, multiple destinations, unreachable goals, varying edge weights, and larger graphs.
 
-To run the custom-search integration checks:
+To run the custom-search checks on `testcase12.txt` through `testcase16.txt`:
 
 ```bash
-python test_custom_integration.py
+python test_member3.py
 ```
 
 Expected summary:
@@ -114,7 +114,13 @@ Expected summary:
 Results: 10/10 checks passed
 ```
 
-These checks validate the paths returned by CUS1 and CUS2 against independently calculated minimum move counts. The report contains the broader six-algorithm testing analysis.
+These checks validate the paths returned by CUS1 and CUS2 against independently calculated minimum move counts. To run all six algorithms against all 17 graph files plus two built-in edge cases:
+
+```bash
+python verify_project.py
+```
+
+`test_custom_integration.py` is retained with its original file references; use `test_member3.py` for the renamed Stage 3 test cases. The report should present the checked results from the full test set.
 
 ## Notes
 
