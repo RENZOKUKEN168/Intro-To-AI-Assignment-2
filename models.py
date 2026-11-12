@@ -220,6 +220,7 @@ class GRURegressor:
         self.learning_rate = learning_rate
         self.random_state = random_state
         self._model: Any | None = None
+        self._history: Any | None = None
         self._sequence_shape: tuple[int, int] | None = None
 
     def _build(self, timesteps: int, features: int) -> Any:
@@ -282,7 +283,7 @@ class GRURegressor:
             )
             validation_data = (valid_X, valid_y)
 
-        self._model.fit(
+        self._history = self._model.fit(
             sequences,
             targets,
             epochs=epochs,
@@ -294,13 +295,16 @@ class GRURegressor:
         )
         return self
 
-    def predict(self, X: Any) -> np.ndarray:
+    def predict(self, X: Any, *, batch_size: int = 256) -> np.ndarray:
         if self._model is None or self._sequence_shape is None:
             raise RuntimeError("Model is not fitted; call fit(X, y) before predict(X)")
         sequences = _prediction_sequences(
             X, timesteps=self._sequence_shape[0], features=self._sequence_shape[1]
         )
-        return np.asarray(self._model.predict(sequences, verbose=0), dtype=np.float32).reshape(-1)
+        return np.asarray(
+            self._model.predict(sequences, batch_size=batch_size, verbose=0),
+            dtype=np.float32,
+        ).reshape(-1)
 
     def save(self, path: str | Path) -> None:
         if self._model is None:

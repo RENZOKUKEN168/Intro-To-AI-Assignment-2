@@ -1,50 +1,45 @@
-# Member 2: GRU and BiLSTM for Traffic Forecasting
+# Assignment 2B: Traffic Prediction and Route Guidance
 
-This implementation follows the project forecasting setup: one traffic observation every 15 minutes; input windows of 4, 8, or 12 observations (1, 2, or 3 hours); predict the next 15-minute observation (`window + 1`). The model comparison should include LSTM (Member 1), GRU, and BiLSTM. A regression-tree implementation is also kept as an optional baseline.
+This repository combines the Assignment 2A tree-based route search with the Assignment 2B traffic prediction pipeline. The A2A search code remains available at the repository root.
 
-## Data handoff
+## A2B data and models
 
-Prepare one time-ordered series per traffic location. Sort each location by timestamp and call `make_forecasting_windows` separately for each location so a window never crosses between sites. The function accepts a 1-D traffic-flow series or a 2-D array shaped `(observations, features)` and returns:
+The supplied SCATS dataset is processed into one record per site every 15 minutes. The project prepares chronological training, validation, and test sequences for lookbacks of 4, 8, and 12 observations, each predicting the next 15-minute traffic count. The model comparison is LSTM, GRU, and BiLSTM; a decision-tree regressor remains available as an optional baseline.
 
-- `X`: `(samples, lookback, features)`
-- `y`: the selected traffic-flow value at the next observation
+## Setup
 
-Use the same chronological train/validation/test partitions for all models. Fit any scaling on training data only.
-
-## Train GRU / BiLSTM
-
-Use Python 3.11 on macOS, select the project virtual environment in VS Code, then install dependencies:
+Use Python 3.11 on macOS for TensorFlow compatibility. Create and activate a virtual environment, then install the ML requirements:
 
 ```sh
 python3.11 -m venv .venv
 source .venv/bin/activate
-python -m pip install -r requirements-gru.txt
+python -m pip install --upgrade pip
+python -m pip install -r requirements-ml.txt
 ```
 
-Example:
-
-```python
-from models import GRURegressor, BiLSTMRegressor, evaluate_predictions, make_forecasting_windows
-
-X, y = make_forecasting_windows(site_flow, lookback=4)  # 1 hour of history, predict next 15 minutes
-model = GRURegressor()  # Or BiLSTMRegressor()
-model.fit(X_train, y_train, validation_data=(X_validation, y_validation), epochs=50)
-predictions = model.predict(X_test)
-print(evaluate_predictions(y_test, predictions).as_dict())
-```
-
-Train/evaluate with lookbacks `4`, `8`, and `12` separately so the results compare one, two, and three hours of history.
-
-## Evaluation metrics
-
-The evaluator reports RMSE, MAE, MSE, and R² as shown in the project slide. It also reports NRMSE for the assignment comparison; here NRMSE is RMSE divided by the range of held-out actual values. Compare every model on the same held-out timestamps and target values.
-
-## Tests
-
-From the repository root, run:
+## Reproduce preprocessing and training
 
 ```sh
-python -m unittest -v test_models
+python -m ml.preprocess
+python -m ml.dataset
+python -m ml.train_all_models
 ```
 
-The tests cover all three lookback sizes, next-step target alignment, metrics, input validation, regression-tree save/load, and GRU/BiLSTM dependency behavior.
+Training writes one model per architecture and lookback under `models/`, plus a consolidated `models/evaluation_results.csv` and held-out prediction CSVs. Metrics are reported in original vehicles-per-15-minute units.
+
+## Run tests
+
+```sh
+python -m unittest discover -s ml/tests -v
+python -m unittest discover -s tbrgs/tests -v
+python -m unittest -v test_models
+python verify_project.py
+```
+
+The model unit suite has 15 cases. The data and route suites add coverage for preprocessing, route-weight conversion, and route search.
+
+## A2B route integration
+
+The real TBRGS command is `python -m tbrgs.app`; it requires populated `data/tbrgs/scats_sites.csv` and `data/tbrgs/road_links.csv` files. The template files document their schemas. The app predicts flow for the requested departure time, converts it to travel-time edge costs, then calls the A2A A* search. Those real Boroondara road links and their SCATS mapping must be supplied from verified assignment data; the repository's demo network is synthetic and must not be presented as a real route result. See [README_TBRGS.md](README_TBRGS.md).
+
+The A2A command line remains `python search.py <filename> <method>`.
