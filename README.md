@@ -8,7 +8,7 @@ The supplied SCATS dataset is processed into one record per site every 15 minute
 
 ## Setup
 
-Use Python 3.11 on macOS for TensorFlow compatibility. Create and activate a virtual environment, then install the ML requirements:
+Use Python 3.11 for TensorFlow compatibility. Create and activate a virtual environment, then install the ML requirements:
 
 ```sh
 python3.11 -m venv .venv
