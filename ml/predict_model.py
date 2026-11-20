@@ -1,4 +1,8 @@
-"""Predict one 15-minute traffic-flow step for an SCATS site."""
+"""Predict one 15-minute traffic-flow step for an SCATS site.
+
+LSTM, GRU and BiLSTM use Keras artifacts. Random Forest uses a joblib artifact
+and deliberately does not require TensorFlow for inference.
+"""
 
 from __future__ import annotations
 
@@ -13,18 +17,35 @@ DATA_PATH = BASE_DIR / "data" / "processed" / "scats_traffic_clean.csv"
 SCALER_PATH = BASE_DIR / "data" / "processed" / "scaler_params.npz"
 MODEL_DIR = BASE_DIR / "models"
 WINDOW_SIZES = (4, 8, 12)
-MODEL_NAMES = ("LSTM", "GRU", "BiLSTM")
+MODEL_NAMES = ("LSTM", "GRU", "BiLSTM", "RandomForest")
 
 
 @lru_cache(maxsize=1)
 def _load_traffic_data() -> pd.DataFrame:
     if not DATA_PATH.exists():
         raise FileNotFoundError(f"Processed traffic data not found: {DATA_PATH}")
-    return pd.read_csv(DATA_PATH, parse_dates=["timestamp"])
+    frame = pd.read_csv(DATA_PATH, parse_dates=["timestamp"])
+    required = {"scats_id", "timestamp", "traffic_flow"}
+    missing = required.difference(frame.columns)
+    if missing:
+        raise ValueError(f"Processed traffic data is missing columns: {sorted(missing)}")
+    return frame
 
 
-@lru_cache(maxsize=9)
+@lru_cache(maxsize=12)
 def _load_model(model_name: str, lookback: int):
+    """Load a trained artifact, using joblib for Random Forest and Keras otherwise."""
+    if model_name == "RandomForest":
+        model_path = MODEL_DIR / "random_forest" / f"window_{lookback}.joblib"
+        if not model_path.exists():
+            raise FileNotFoundError(
+                f"Trained Random Forest model for {lookback} steps not found at {model_path}. "
+                "Run `python -m ml.train_random_forest` first."
+            )
+        from models import RandomForestTrafficRegressor
+
+        return RandomForestTrafficRegressor.load(model_path)
+
     candidates = [MODEL_DIR / model_name.lower() / f"window_{lookback}.keras"]
     if model_name == "LSTM" and lookback == 8:
         candidates.append(MODEL_DIR / "lstm" / "lstm_model.keras")
@@ -39,7 +60,8 @@ def _load_model(model_name: str, lookback: int):
         import tensorflow as tf
     except ImportError as exc:
         raise ImportError(
-            "Traffic model inference requires TensorFlow. Install requirements-ml.txt."
+            "LSTM/GRU/BiLSTM inference requires TensorFlow. Install a compatible "
+            "TensorFlow version using requirements-gru.txt."
         ) from exc
     return tf.keras.models.load_model(model_path, compile=False)
 
@@ -54,7 +76,9 @@ def predict_traffic(
     """Predict the flow count at ``prediction_time`` from prior 15-minute rows."""
     from tbrgs.travel_time import TrafficPrediction
 
-    normalized_name = {name.lower(): name for name in MODEL_NAMES}.get(str(model_name).lower())
+    aliases = {name.lower(): name for name in MODEL_NAMES}
+    aliases.update({"random_forest": "RandomForest", "rf": "RandomForest"})
+    normalized_name = aliases.get(str(model_name).strip().lower())
     if normalized_name is None:
         raise ValueError(f"model_name must be one of {MODEL_NAMES}.")
     if lookback not in WINDOW_SIZES:
@@ -93,7 +117,10 @@ def predict_traffic(
     history = site_data["traffic_flow"].to_numpy(dtype=np.float32)
     X = (history * scale + offset).reshape(1, lookback, 1).astype(np.float32)
     model = _load_model(normalized_name, lookback)
-    predicted_scaled = float(np.asarray(model.predict(X, verbose=0)).reshape(-1)[0])
+    if normalized_name == "RandomForest":
+        predicted_scaled = float(np.asarray(model.predict(X)).reshape(-1)[0])
+    else:
+        predicted_scaled = float(np.asarray(model.predict(X, verbose=0)).reshape(-1)[0])
     predicted_flow = max(0.0, (predicted_scaled - offset) / scale)
     return TrafficPrediction(
         scats_id=site_id,
