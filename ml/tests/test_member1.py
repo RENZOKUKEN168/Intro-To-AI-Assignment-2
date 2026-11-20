@@ -1,4 +1,5 @@
 
+import importlib.util
 import unittest
 from pathlib import Path
 
@@ -268,6 +269,10 @@ class TestDatasetSequences(unittest.TestCase):
 class TestLSTMPrediction(unittest.TestCase):
 
     # TC15
+    @unittest.skipUnless(
+        importlib.util.find_spec("tensorflow"),
+        "TensorFlow is not installed; run this inference test in a TensorFlow-compatible environment.",
+    )
     def test_15_valid_lstm_prediction(self):
         result = predict_traffic(
             970,

@@ -1,4 +1,11 @@
-__pycache__/
+﻿__pycache__/
 *.py[cod]
 .venv/
+.venv-tf/
 .DS_Store
+
+# Local model backups
+models/random_forest_sklearn18_backup/
+
+# Nested repository clone
+/Intro-To-AI-Assignment-2/

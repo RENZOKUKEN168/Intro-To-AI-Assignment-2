@@ -7,6 +7,7 @@ import numpy as np
 from models import (
     BiLSTMRegressor,
     GRURegressor,
+    RandomForestTrafficRegressor,
     RegressionTreeRegressor,
     evaluate_predictions,
     make_forecasting_windows,
@@ -91,6 +92,85 @@ class RegressionTreeTests(unittest.TestCase):
             RegressionTreeRegressor(max_depth=0)
         with self.assertRaisesRegex(ValueError, "min_samples_leaf"):
             RegressionTreeRegressor(min_samples_leaf=0)
+
+
+class RandomForestTests(unittest.TestCase):
+    def setUp(self):
+        self.X = np.array(
+            [
+                [[1.0], [2.0], [3.0]],
+                [[2.0], [3.0], [4.0]],
+                [[3.0], [4.0], [5.0]],
+                [[4.0], [5.0], [6.0]],
+            ],
+            dtype=np.float32,
+        )
+        self.y = np.array([3.0, 4.0, 5.0, 6.0], dtype=np.float32)
+
+    def create_model(self):
+        return RandomForestTrafficRegressor(
+            n_estimators=20,
+            min_samples_leaf=1,
+            random_state=42,
+            n_jobs=1,
+        )
+
+    def test_fit_predict_has_one_value_per_sample(self):
+        model = self.create_model().fit(self.X, self.y)
+        prediction = model.predict(self.X)
+
+        self.assertEqual(prediction.shape, (4,))
+        self.assertTrue(np.isfinite(prediction).all())
+
+    def test_predict_accepts_one_sequence(self):
+        model = self.create_model().fit(self.X, self.y)
+        prediction = model.predict(self.X[0])
+
+        self.assertEqual(prediction.shape, (1,))
+        self.assertTrue(np.isfinite(prediction).all())
+
+    def test_save_and_load_preserves_predictions(self):
+        model = self.create_model().fit(self.X, self.y)
+        original_predictions = model.predict(self.X)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "random_forest.joblib"
+            model.save(path)
+            loaded = RandomForestTrafficRegressor.load(path)
+            loaded_predictions = loaded.predict(self.X)
+
+        np.testing.assert_allclose(loaded_predictions, original_predictions)
+
+    def test_predict_before_fit_fails_clearly(self):
+        with self.assertRaisesRegex(RuntimeError, "not fitted"):
+            self.create_model().predict(self.X)
+
+    def test_wrong_sequence_shape_is_rejected(self):
+        model = self.create_model().fit(self.X, self.y)
+
+        with self.assertRaisesRegex(ValueError, "Expected each sequence"):
+            model.predict(np.zeros((2, 2), dtype=np.float32))
+
+    def test_nan_features_are_rejected(self):
+        bad_X = self.X.copy()
+        bad_X[0, 0, 0] = np.nan
+
+        with self.assertRaisesRegex(ValueError, "NaN"):
+            self.create_model().fit(bad_X, self.y)
+
+    def test_mismatched_target_count_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "samples"):
+            self.create_model().fit(self.X, self.y[:2])
+
+    def test_invalid_random_forest_configuration_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "n_estimators"):
+            RandomForestTrafficRegressor(n_estimators=0)
+        with self.assertRaisesRegex(ValueError, "max_depth"):
+            RandomForestTrafficRegressor(max_depth=0)
+        with self.assertRaisesRegex(ValueError, "min_samples_leaf"):
+            RandomForestTrafficRegressor(min_samples_leaf=0)
+        with self.assertRaisesRegex(ValueError, "max_features"):
+            RandomForestTrafficRegressor(max_features=0)
 
 
 class EvaluationTests(unittest.TestCase):

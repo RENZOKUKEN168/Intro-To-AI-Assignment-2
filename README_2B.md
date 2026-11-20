@@ -1,50 +1,68 @@
-# Member 2: GRU and BiLSTM for Traffic Forecasting
+# Traffic Forecasting Models (Assignment 2B)
 
-This implementation follows the project forecasting setup: one traffic observation every 15 minutes; input windows of 4, 8, or 12 observations (1, 2, or 3 hours); predict the next 15-minute observation (`window + 1`). The model comparison should include LSTM (Member 1), GRU, and BiLSTM. A regression-tree implementation is also kept as an optional baseline.
+The forecasting pipeline uses one observation every 15 minutes and predicts the next 15-minute traffic-flow value. It supports lookback windows of 4, 8, and 12 observations (1, 2, and 3 hours).
 
-## Data handoff
+## Models
 
-Prepare one time-ordered series per traffic location. Sort each location by timestamp and call `make_forecasting_windows` separately for each location so a window never crosses between sites. The function accepts a 1-D traffic-flow series or a 2-D array shaped `(observations, features)` and returns:
+The required comparison set is:
 
-- `X`: `(samples, lookback, features)`
-- `y`: the selected traffic-flow value at the next observation
+- **LSTM**
+- **GRU**
+- **Random Forest Regressor**
 
-Use the same chronological train/validation/test partitions for all models. Fit any scaling on training data only.
+The existing **BiLSTM** implementation is retained as an additional team model. The Decision Tree regressor is retained as an optional baseline and is not counted as Random Forest.
 
-## Train GRU / BiLSTM
+All models use the same chronological train/validation/test splits and the shared scaler fitted on training data only. Sequence windows are generated independently per SCATS site and reject missing 15-minute intervals, so a window does not cross sites or time gaps.
 
-Use Python 3.11 on macOS, select the project virtual environment in VS Code, then install dependencies:
+## Data and preprocessing
 
-```sh
-python3.11 -m venv .venv
-source .venv/bin/activate
-python -m pip install -r requirements-gru.txt
+The source workbook is `data/raw/Scats Data October 2006.xls`. The processed data expected by the pipeline is `data/processed/scats_traffic_clean.csv`, with columns:
+
+```text
+scats_id,timestamp,traffic_flow
 ```
 
-Example:
+The prepared sequence files and scaler parameters are under `data/processed/`. Do not edit the original workbook or overwrite the shared model evaluation results when training Random Forest.
 
-```python
-from models import GRURegressor, BiLSTMRegressor, evaluate_predictions, make_forecasting_windows
+To regenerate the shared sequence files only when necessary:
 
-X, y = make_forecasting_windows(site_flow, lookback=4)  # 1 hour of history, predict next 15 minutes
-model = GRURegressor()  # Or BiLSTMRegressor()
-model.fit(X_train, y_train, validation_data=(X_validation, y_validation), epochs=50)
-predictions = model.predict(X_test)
-print(evaluate_predictions(y_test, predictions).as_dict())
+```powershell
+python -m ml.dataset
 ```
 
-Train/evaluate with lookbacks `4`, `8`, and `12` separately so the results compare one, two, and three hours of history.
+## Train Random Forest
 
-## Evaluation metrics
+Random Forest has a separate training script and writes only to `models/random_forest/`:
 
-The evaluator reports RMSE, MAE, MSE, and R² as shown in the project slide. It also reports NRMSE for the assignment comparison; here NRMSE is RMSE divided by the range of held-out actual values. Compare every model on the same held-out timestamps and target values.
+```powershell
+python -m ml.train_random_forest --lookbacks 4 8 12 --n-estimators 50 --max-depth 16 --n-jobs -1
+```
+
+For a quick smoke test before full training:
+
+```powershell
+python -m ml.train_random_forest --lookbacks 4 --n-estimators 5 --max-depth 16 --n-jobs 1
+```
+
+Outputs include `window_4.joblib`, `window_8.joblib`, `window_12.joblib`, a separate `evaluation_results.csv`, and test prediction CSVs. These do not overwrite LSTM, GRU, or BiLSTM artifacts.
+
+## Train neural models
+
+LSTM, GRU, and BiLSTM use TensorFlow/Keras. Install a TensorFlow-compatible Python version and dependencies from `requirements-gru.txt`, then run:
+
+```powershell
+python -m ml.train_all_models
+```
+
+Random Forest does not require TensorFlow. Its training and inference use scikit-learn and joblib.
+
+## Evaluation
+
+Compare the same held-out timestamps and target values using MAE, MSE, RMSE, R², and NRMSE. NRMSE is RMSE divided by the range of held-out actual values. Predictions are converted back to vehicles per 15-minute interval before metrics are calculated.
 
 ## Tests
 
-From the repository root, run:
-
-```sh
+```powershell
 python -m unittest -v test_models
+python -m unittest discover -s ml/tests -v
 ```
-
-The tests cover all three lookback sizes, next-step target alignment, metrics, input validation, regression-tree save/load, and GRU/BiLSTM dependency behavior.

@@ -1,0 +1,22 @@
+{
+    "run_name": "location_neural_full_20261119",
+    "models": [
+        "LSTM",
+        "GRU",
+        "BiLSTM"
+    ],
+    "lookbacks": [
+        4,
+        8,
+        12
+    ],
+    "epochs": 20,
+    "batch_size": 256,
+    "random_seed": 42,
+    "dataset": "data/processed/location_level",
+    "training_design": "Global models using pooled physical location series",
+    "scaler": {
+        "scale": 0.0015723270440251573,
+        "offset": 0.0
+    }
+}

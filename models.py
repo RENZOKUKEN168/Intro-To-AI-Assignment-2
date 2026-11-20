@@ -1,6 +1,6 @@
 """Traffic forecasting models for 15-minute SCATS data.
 
-GRU, BiLSTM, and the regression-tree baseline use the same contract:
+Random Forest, GRU, BiLSTM, and the regression-tree baseline use the same contract:
     X: (samples, timesteps, features)
     y: (samples,) or (samples, 1)
 
@@ -19,6 +19,7 @@ import joblib
 import numpy as np
 from sklearn.metrics import r2_score
 from sklearn.tree import DecisionTreeRegressor
+from sklearn.ensemble import RandomForestRegressor as SklearnRandomForestRegressor
 
 
 def _as_3d_features(X: Any, *, name: str = "X") -> np.ndarray:
@@ -195,6 +196,107 @@ class RegressionTreeRegressor:
         instance = cls(**artifact["config"])
         instance._model = artifact["model"]
         instance._sequence_shape = tuple(artifact["sequence_shape"])
+        return instance
+
+
+class RandomForestTrafficRegressor:
+    """Random Forest regressor using flattened traffic-history windows."""
+
+    def __init__(
+        self,
+        *,
+        n_estimators: int = 200,
+        max_depth: int | None = None,
+        min_samples_leaf: int = 2,
+        max_features: float = 1.0,
+        random_state: int = 42,
+        n_jobs: int = -1,
+    ) -> None:
+        if n_estimators < 1:
+            raise ValueError("n_estimators must be at least 1")
+        if max_depth is not None and max_depth < 1:
+            raise ValueError("max_depth must be positive or None")
+        if min_samples_leaf < 1:
+            raise ValueError("min_samples_leaf must be at least 1")
+        if not 0 < max_features <= 1:
+            raise ValueError("max_features must be greater than 0 and at most 1")
+
+        self.n_estimators = n_estimators
+        self.max_depth = max_depth
+        self.min_samples_leaf = min_samples_leaf
+        self.max_features = max_features
+        self.random_state = random_state
+        self.n_jobs = n_jobs
+
+        self._model = SklearnRandomForestRegressor(
+            n_estimators=n_estimators,
+            max_depth=max_depth,
+            min_samples_leaf=min_samples_leaf,
+            max_features=max_features,
+            random_state=random_state,
+            n_jobs=n_jobs,
+        )
+        self._sequence_shape: tuple[int, int] | None = None
+
+    def fit(self, X: Any, y: Any) -> "RandomForestTrafficRegressor":
+        sequences = _as_3d_features(X)
+        targets = _as_targets(y, expected_samples=sequences.shape[0])
+
+        self._sequence_shape = (sequences.shape[1], sequences.shape[2])
+        flattened = sequences.reshape(sequences.shape[0], -1)
+        self._model.fit(flattened, targets)
+
+        return self
+
+    def predict(self, X: Any) -> np.ndarray:
+        if self._sequence_shape is None:
+            raise RuntimeError(
+                "Model is not fitted; call fit(X, y) before predict(X)"
+            )
+
+        sequences = _prediction_sequences(
+            X,
+            timesteps=self._sequence_shape[0],
+            features=self._sequence_shape[1],
+        )
+        flattened = sequences.reshape(sequences.shape[0], -1)
+
+        return np.asarray(
+            self._model.predict(flattened),
+            dtype=np.float32,
+        ).reshape(-1)
+
+    def save(self, path: str | Path) -> None:
+        if self._sequence_shape is None:
+            raise RuntimeError("Cannot save an unfitted model")
+
+        destination = Path(path)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+
+        joblib.dump(
+            {
+                "model": self._model,
+                "sequence_shape": self._sequence_shape,
+                "config": {
+                    "n_estimators": self.n_estimators,
+                    "max_depth": self.max_depth,
+                    "min_samples_leaf": self.min_samples_leaf,
+                    "max_features": self.max_features,
+                    "random_state": self.random_state,
+                    "n_jobs": self.n_jobs,
+                },
+            },
+            destination,
+        )
+
+    @classmethod
+    def load(cls, path: str | Path) -> "RandomForestTrafficRegressor":
+        artifact = joblib.load(Path(path))
+
+        instance = cls(**artifact["config"])
+        instance._model = artifact["model"]
+        instance._sequence_shape = tuple(artifact["sequence_shape"])
+
         return instance
 
 
