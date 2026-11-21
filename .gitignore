@@ -1,11 +1,21 @@
-﻿__pycache__/
+﻿# Python Cache
+__pycache__/
 *.py[cod]
+
+# Virtual Environments
 .venv/
 .venv-tf/
+
+# Environment Variables
+.env
+.env.*
+!.env.example
+
+# Operating System Files
 .DS_Store
 
-# Local model backups
+# Local Model Backups
 models/random_forest_sklearn18_backup/
 
-# Nested repository clone
+# Nested Repository Clone
 /Intro-To-AI-Assignment-2/
