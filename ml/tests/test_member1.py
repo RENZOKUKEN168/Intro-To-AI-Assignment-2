@@ -3,6 +3,9 @@ import importlib.util
 import unittest
 from pathlib import Path
 
+from unittest.mock import patch
+from ml import predict_lstm
+
 import numpy as np
 import pandas as pd
 
@@ -306,7 +309,36 @@ class TestLSTMPrediction(unittest.TestCase):
                 970,
                 "2006-10-27 08:07:00"
             )
+    
+    # TC18 - Verify LSTM prediction rounding
+    def test_18_lstm_round_up(self):
 
+        mock_prediction = TrafficPrediction(
+            scats_id=970,
+            predicted_flow=1128.21,
+            unit="vehicles_per_15_minutes",
+            model_name="LSTM",
+            prediction_time="2006-10-27T08:00:00"
+        )
+
+        with patch.object(
+            predict_lstm,
+            "_predict_traffic",
+            return_value=mock_prediction
+        ):
+            result = predict_lstm.predict_traffic(
+                970,
+                "2006-10-27 08:00:00"
+            )
+
+        self.assertEqual(result.predicted_flow, 1129)
+        self.assertIsInstance(result.predicted_flow, int)
+        self.assertEqual(result.scats_id, 970)
+        self.assertEqual(result.model_name, "LSTM")
+        self.assertEqual(
+            result.unit,
+            "vehicles_per_15_minutes"
+        )
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
