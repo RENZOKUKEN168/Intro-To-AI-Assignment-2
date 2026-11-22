@@ -189,7 +189,7 @@ To change the network, edit `ROAD_SEGMENTS` in `tbrgs/build_road_network.py` and
 
 ## Travel-time conversion
 
-From the supplied `docs/Traffic_Flow_to_Travel_Time_Conversion_v1.0.pdf`:
+From the supplied *Traffic Flow to Travel Time Conversion v1.0* guide (Canvas):
 
 ```text
 flow = -1.4648375 * speed^2 + 93.75 * speed
@@ -313,4 +313,3 @@ The neural inference test requires TensorFlow; the raw `.xls` loading test requi
 | `basic_search.py`, `inform_search.py`, `custom_search.py` | Part A search algorithms |
 | `test_case/` | Part A graph test cases |
 | `data/raw/`, `data/processed/`, `data/tbrgs/` | Raw, processed and road-network data |
-| `docs/` | Travel-time conversion guide and integration handoff notes |

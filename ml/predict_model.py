@@ -42,6 +42,14 @@ def _load_model(model_name: str, lookback: int):
                 f"Trained Random Forest model for {lookback} steps not found at {model_path}. "
                 "Run `python -m ml.train_random_forest` first."
             )
+        # A Git LFS pointer is a tiny text file, not the model; joblib would fail
+        # with an unhelpful KeyError, so explain the fix instead.
+        with model_path.open("rb") as handle:
+            if handle.read(40).startswith(b"version https://git-lfs"):
+                raise FileNotFoundError(
+                    f"{model_path} is a Git LFS pointer, not the trained model. "
+                    "Install Git LFS, then run `git lfs install` and `git lfs pull`."
+                )
         from models import RandomForestTrafficRegressor
 
         return RandomForestTrafficRegressor.load(model_path)
