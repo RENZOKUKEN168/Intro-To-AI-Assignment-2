@@ -65,3 +65,59 @@ class TBRGSConfig:
             raise ValueError("signal_delay_seconds cannot be negative.")
         if self.k_routes < 1:
             raise ValueError("k_routes must be at least 1.")
+
+
+# ---------------------------------------------------------------------------
+# GUI / command-line defaults loaded from the JSON configuration file.
+# ---------------------------------------------------------------------------
+
+import json
+from pathlib import Path
+from typing import Any
+
+DEFAULTS_FILE = Path(__file__).resolve().parents[1] / "config.json"
+
+# Built-in fallbacks, used for any key missing from config.json.
+BUILTIN_DEFAULTS: dict[str, Any] = {
+    "origin": 2000,
+    "destination": 3002,
+    "prediction_time": "2006-10-27 08:00",
+    "model": "LSTM",
+    "lookback": 8,
+    "search_method": "AS",
+    "k_routes": 5,
+    "flow_source": "destination",
+    "speed_branch": "free_flow",
+    "oversaturation_policy": "raise",
+    "skip_unavailable_sites": False,
+    "sites_csv": "data/tbrgs/scats_sites.csv",
+    "links_csv": "data/tbrgs/road_links.csv",
+}
+
+
+def load_defaults(path: Path | str = DEFAULTS_FILE) -> dict[str, Any]:
+    """Return the GUI defaults: built-in values overridden by the JSON file.
+
+    A missing file falls back to the built-in values. Unknown keys and invalid
+    JSON raise ``ValueError`` so a typo in the file is reported, not ignored.
+    Relative CSV paths are resolved against the repository root.
+    """
+    defaults = dict(BUILTIN_DEFAULTS)
+    path = Path(path)
+    if path.is_file():
+        try:
+            loaded = json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as error:
+            raise ValueError(f"Invalid JSON in {path}: {error}") from error
+        if not isinstance(loaded, dict):
+            raise ValueError(f"{path} must contain a JSON object.")
+        unknown = set(loaded) - set(BUILTIN_DEFAULTS)
+        if unknown:
+            raise ValueError(f"Unknown keys in {path}: {', '.join(sorted(unknown))}")
+        defaults.update(loaded)
+
+    root = DEFAULTS_FILE.parent
+    for key in ("sites_csv", "links_csv"):
+        csv_path = Path(defaults[key])
+        defaults[key] = csv_path if csv_path.is_absolute() else root / csv_path
+    return defaults

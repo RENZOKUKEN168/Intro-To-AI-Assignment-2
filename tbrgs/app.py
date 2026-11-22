@@ -1,4 +1,4 @@
-"""Run A2A A* and up to K Yen routes using traffic-predicted edge costs.
+"""Run an A2A search (A* by default) and up to K Yen routes using traffic-predicted edge costs.
 
 Example:
     python -m tbrgs.app 2000 3002 "2006-10-29 04:00" --model RandomForest --lookback 12
@@ -9,9 +9,9 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from inform_search import astar_search
 from ml.predict_model import MODEL_NAMES, WINDOW_SIZES, predict_traffic
 from route_problem import RouteProblem
+from search import METHODS as SEARCH_METHODS, run_search
 from tbrgs.config import TBRGSConfig
 from tbrgs.road_graph import build_road_network, load_road_network
 from tbrgs.top_k_routes import k_shortest_loopless_paths
@@ -33,15 +33,26 @@ def run_tbrgs(
     k_routes: int = 5,
     oversaturation_policy: str = "raise",
     skip_unavailable_sites: bool = False,
+    search_method: str = "AS",
 ):
-    """Build predicted edge costs, run A2A A*, and calculate up to K alternatives.
+    """Build predicted edge costs, run an A2A search, and calculate up to K alternatives.
 
-    Returns ``(astar_result, yen_routes, link_estimates, config, skipped_sites)``.
+    ``search_method`` selects any Assignment 2A algorithm (``DFS``, ``BFS``,
+    ``GBFS``, ``AS``, ``CUS1``, ``CUS2``); A* is the default because it is the
+    only one that is optimal on travel-time costs.
+
+    Returns ``(search_result, yen_routes, link_estimates, config, skipped_sites)``.
     Yen routes are ordered by travel time and are distinct and loopless. A*
     remains the Assignment 2A search integration and its cost is checked
     against Yen's best. When explicitly enabled, sites without consecutive
     history are removed together with their incident links.
     """
+    search_method = search_method.upper()
+    if search_method not in SEARCH_METHODS:
+        raise ValueError(
+            f"Unknown search method {search_method!r}; choose one of {', '.join(SEARCH_METHODS)}."
+        )
+
     network = load_road_network(sites_csv, links_csv)
     if origin not in network.sites or destination not in network.sites:
         raise ValueError("Origin and destination must be listed in the SCATS sites CSV.")
@@ -101,20 +112,26 @@ def run_tbrgs(
         coordinates = {site_id: (0.0, 0.0) for site_id in network.node_ids}
 
     problem = RouteProblem(weighted_graph, origin, [destination], coordinates)
-    astar_result = astar_search(problem)
+    search_result = run_search(problem, search_method)
     alternatives = k_shortest_loopless_paths(
         weighted_graph, origin, destination, k=config.k_routes
     )
 
-    # A* and Yen/Dijkstra must agree on the optimal travel-time value.
-    if astar_result.goal is None and alternatives:
-        raise RuntimeError("A* and Yen disagree: Yen found a route but A* did not.")
-    if astar_result.goal is not None and not alternatives:
-        raise RuntimeError("A* and Yen disagree: A* found a route but Yen did not.")
-    if alternatives and abs(astar_result.path_cost - alternatives[0].travel_time_seconds) > 1e-6:
+    # Every complete search must agree with Yen on whether a route exists.
+    if search_result.goal is None and alternatives:
+        raise RuntimeError(f"{search_method} and Yen disagree: Yen found a route but {search_method} did not.")
+    if search_result.goal is not None and not alternatives:
+        raise RuntimeError(f"{search_method} and Yen disagree: {search_method} found a route but Yen did not.")
+    # Only A* is cost-optimal, so only A* must match Yen's best travel time.
+    # DFS, BFS, GBFS and the move-count custom searches may return longer routes.
+    if (
+        search_method == "AS"
+        and alternatives
+        and abs(search_result.path_cost - alternatives[0].travel_time_seconds) > 1e-6
+    ):
         raise RuntimeError("A* and Yen disagree on the shortest travel-time cost.")
 
-    return astar_result, alternatives, estimates, config, skipped_sites
+    return search_result, alternatives, estimates, config, skipped_sites
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -128,6 +145,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--links", type=Path, default=BASE_DIR / "data/tbrgs/road_links.csv")
     parser.add_argument("--flow-source", choices=("origin", "destination"), default="destination")
     parser.add_argument("--speed-branch", choices=("free_flow", "congested"), default="free_flow")
+    parser.add_argument(
+        "--method", type=str.upper, choices=tuple(SEARCH_METHODS), default="AS",
+        help="Assignment 2A search algorithm for the primary route (default: AS = A*)",
+    )
     parser.add_argument("--k-routes", type=int, default=5, help="Maximum number of loopless routes (default: 5)")
     parser.add_argument(
         "--oversaturation-policy", choices=("raise", "clamp"), default="raise",
@@ -162,6 +183,7 @@ def main(argv: list[str] | None = None) -> int:
             args.k_routes,
             args.oversaturation_policy,
             args.skip_unavailable_sites,
+            args.method,
         )
     except (FileNotFoundError, KeyError, ValueError, ImportError, RuntimeError) as error:
         parser.error(str(error))
@@ -176,9 +198,9 @@ def main(argv: list[str] | None = None) -> int:
         f"Flow source: {config.flow_source} | Speed branch: {config.speed_branch} | "
         f"Oversaturation: {config.oversaturation_policy}"
     )
-    print(f"A2A A* shortest route: {' -> '.join(map(str, result.path))}")
+    print(f"A2A {args.method} route: {' -> '.join(map(str, result.path))}")
     print(
-        f"A2A A* travel time: {result.path_cost:.1f} seconds "
+        f"A2A {args.method} travel time: {result.path_cost:.1f} seconds "
         f"({result.path_cost / 60:.2f} minutes)"
     )
     print(f"Search nodes created: {result.nodes_created}")

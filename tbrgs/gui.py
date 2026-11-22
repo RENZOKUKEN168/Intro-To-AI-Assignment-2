@@ -13,15 +13,27 @@ from tkinter import filedialog, messagebox, ttk
 from typing import Callable
 
 from ml.predict_model import MODEL_NAMES, WINDOW_SIZES, predict_traffic
+from search import METHODS as SEARCH_METHODS
 from tbrgs.app import run_tbrgs
+from tbrgs.config import load_defaults
 
-BASE_DIR = Path(__file__).resolve().parents[1]
-DEFAULT_SITES = BASE_DIR / "data" / "tbrgs" / "scats_sites.csv"
-DEFAULT_LINKS = BASE_DIR / "data" / "tbrgs" / "road_links.csv"
+# Readable names for the Assignment 2A search algorithms shown in the GUI.
+ALGORITHM_LABELS = {
+    "AS": "A* (optimal travel time)",
+    "GBFS": "Greedy best-first",
+    "BFS": "Breadth-first",
+    "DFS": "Depth-first",
+    "CUS1": "CUS1 - iterative deepening DFS",
+    "CUS2": "CUS2 - IDA* (fewest moves)",
+}
+LABEL_TO_METHOD = {label: code for code, label in ALGORITHM_LABELS.items()}
 
 
 class TrafficRoutingGUI(tk.Tk):
-    """Tkinter interface for the existing prediction and A* integration."""
+    """Tkinter interface for traffic prediction and A2A route search.
+
+    Default field values come from ``config.json`` in the repository root.
+    """
 
     BG = "#f3f6fb"
     CARD = "#ffffff"
@@ -33,9 +45,10 @@ class TrafficRoutingGUI(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
         self.title("SCATS Traffic Forecast & Route Planner")
-        self.geometry("980x720")
-        self.minsize(820, 620)
+        self.geometry("1040x940")
+        self.minsize(860, 720)
         self.configure(bg=self.BG)
+        self.defaults = load_defaults()
         self._events: queue.Queue[tuple[str, object]] = queue.Queue()
         self._busy = False
         self._setup_styles()
@@ -69,7 +82,7 @@ class TrafficRoutingGUI(tk.Tk):
         ttk.Label(outer, text="Traffic Forecast & Route Planner", style="Title.TLabel").pack(anchor="w")
         ttk.Label(
             outer,
-            text="Forecast the next 15-minute SCATS traffic flow, then use it as the A* route cost.",
+            text="Forecast the next 15-minute SCATS traffic flow, then use it as the route search's travel-time cost.",
             style="Subtitle.TLabel",
         ).pack(anchor="w", pady=(5, 17))
 
@@ -106,10 +119,11 @@ class TrafficRoutingGUI(tk.Tk):
         ttk.Label(card, text="Predict one SCATS site", style="Section.TLabel").grid(row=0, column=0, columnspan=5, sticky="w", pady=(0, 12))
         for col in (1, 3):
             card.columnconfigure(col, weight=1)
-        self.forecast_site = tk.StringVar(value="2000")
-        self.forecast_time = tk.StringVar(value="2006-10-27 08:00")
-        self.forecast_model = tk.StringVar(value="GRU")
-        self.forecast_window = tk.StringVar(value="8")
+        d = self.defaults
+        self.forecast_site = tk.StringVar(value=str(d["origin"]))
+        self.forecast_time = tk.StringVar(value=d["prediction_time"])
+        self.forecast_model = tk.StringVar(value=d["model"])
+        self.forecast_window = tk.StringVar(value=str(d["lookback"]))
         self._entry(card, 1, 0, "SCATS site ID", self.forecast_site)
         self._entry(card, 2, 0, "Prediction time", self.forecast_time)
         self._model_fields(card, 3, self.forecast_model, self.forecast_window)
@@ -137,15 +151,20 @@ class TrafficRoutingGUI(tk.Tk):
         ttk.Label(form, text="Route request", style="Section.TLabel").grid(row=0, column=0, columnspan=5, sticky="w", pady=(0, 8))
         for col in (1, 3):
             form.columnconfigure(col, weight=1)
-        self.origin_var = tk.StringVar(value="2000")
-        self.destination_var = tk.StringVar(value="3002")
-        self.route_time = tk.StringVar(value="2006-10-27 08:00")
-        self.route_model = tk.StringVar(value="GRU")
-        self.route_window = tk.StringVar(value="8")
-        self.sites_path = tk.StringVar(value=str(DEFAULT_SITES))
-        self.links_path = tk.StringVar(value=str(DEFAULT_LINKS))
-        self.flow_source = tk.StringVar(value="destination")
-        self.speed_branch = tk.StringVar(value="free_flow")
+        d = self.defaults
+        self.origin_var = tk.StringVar(value=str(d["origin"]))
+        self.destination_var = tk.StringVar(value=str(d["destination"]))
+        self.route_time = tk.StringVar(value=d["prediction_time"])
+        self.route_model = tk.StringVar(value=d["model"])
+        self.route_window = tk.StringVar(value=str(d["lookback"]))
+        self.sites_path = tk.StringVar(value=str(d["sites_csv"]))
+        self.links_path = tk.StringVar(value=str(d["links_csv"]))
+        self.flow_source = tk.StringVar(value=d["flow_source"])
+        self.speed_branch = tk.StringVar(value=d["speed_branch"])
+        self.algorithm = tk.StringVar(value=ALGORITHM_LABELS.get(d["search_method"].upper(), ALGORITHM_LABELS["AS"]))
+        self.k_routes = tk.StringVar(value=str(d["k_routes"]))
+        self.oversaturation = tk.StringVar(value=d["oversaturation_policy"])
+        self.skip_unavailable = tk.BooleanVar(value=bool(d["skip_unavailable_sites"]))
         self._entry(form, 1, 0, "Origin SCATS ID", self.origin_var)
         self._entry(form, 2, 0, "Destination SCATS ID", self.destination_var)
         self._entry(form, 3, 0, "Prediction time", self.route_time)
@@ -156,8 +175,17 @@ class TrafficRoutingGUI(tk.Tk):
         ttk.Combobox(form, textvariable=self.flow_source, values=("origin", "destination"), state="readonly", width=20).grid(row=7, column=1, sticky="ew", pady=8)
         ttk.Label(form, text="Speed curve branch", style="Card.TLabel").grid(row=7, column=2, sticky="w", padx=(18, 12), pady=8)
         ttk.Combobox(form, textvariable=self.speed_branch, values=("free_flow", "congested"), state="readonly", width=18).grid(row=7, column=3, sticky="ew", pady=8)
-        self.route_button = ttk.Button(form, text="Find best route", style="Accent.TButton", command=self._route)
-        self.route_button.grid(row=8, column=0, columnspan=5, sticky="w", pady=(12, 2))
+        ttk.Label(form, text="Search algorithm", style="Card.TLabel").grid(row=8, column=0, sticky="w", padx=(0, 12), pady=8)
+        algorithm_values = [ALGORITHM_LABELS[code] for code in ALGORITHM_LABELS if code in SEARCH_METHODS]
+        ttk.Combobox(form, textvariable=self.algorithm, values=algorithm_values, state="readonly", width=20).grid(row=8, column=1, sticky="ew", pady=8)
+        ttk.Label(form, text="Routes to show", style="Card.TLabel").grid(row=8, column=2, sticky="w", padx=(18, 12), pady=8)
+        ttk.Combobox(form, textvariable=self.k_routes, values=("1", "2", "3", "4", "5"), state="readonly", width=18).grid(row=8, column=3, sticky="ew", pady=8)
+        # Flow above the 1500 veh/h capacity: stop with an error, or cap at capacity (32 km/h).
+        ttk.Label(form, text="Above capacity", style="Card.TLabel").grid(row=9, column=0, sticky="w", padx=(0, 12), pady=8)
+        ttk.Combobox(form, textvariable=self.oversaturation, values=("clamp", "raise"), state="readonly", width=20).grid(row=9, column=1, sticky="ew", pady=8)
+        ttk.Checkbutton(form, text="Skip sites without history at this time", variable=self.skip_unavailable).grid(row=9, column=2, columnspan=3, sticky="w", padx=(18, 0), pady=8)
+        self.route_button = ttk.Button(form, text="Find routes", style="Accent.TButton", command=self._route)
+        self.route_button.grid(row=10, column=0, columnspan=5, sticky="w", pady=(12, 2))
 
         summary = ttk.Frame(tab, style="Card.TFrame", padding=18)
         summary.pack(fill="x", pady=(14, 12))
@@ -165,10 +193,24 @@ class TrafficRoutingGUI(tk.Tk):
         self.route_summary = tk.StringVar(value="Select populated site and road-link CSV files to run a real-network search.")
         ttk.Label(summary, textvariable=self.route_summary, style="Card.TLabel", wraplength=850, justify="left").pack(anchor="w", pady=(8, 0))
 
+        # Top-K alternative routes (Yen's algorithm), ranked by travel time.
+        routes_frame = ttk.Frame(tab, style="Card.TFrame", padding=12)
+        routes_frame.pack(fill="x", pady=(0, 12))
+        ttk.Label(routes_frame, text="Top routes by estimated travel time", style="Section.TLabel").pack(anchor="w", pady=(0, 6))
+        self.routes_table = ttk.Treeview(routes_frame, columns=("rank", "route", "minutes"), show="headings", height=5)
+        for key, label, width, anchor in (
+            ("rank", "#", 50, "center"),
+            ("route", "Route (SCATS sites)", 620, "w"),
+            ("minutes", "Travel time (min)", 140, "center"),
+        ):
+            self.routes_table.heading(key, text=label)
+            self.routes_table.column(key, width=width, anchor=anchor, stretch=(key == "route"))
+        self.routes_table.pack(fill="x")
+
         table_frame = ttk.Frame(tab, style="Card.TFrame", padding=12)
         table_frame.pack(fill="both", expand=True)
         columns = ("link", "distance", "flow", "speed", "travel")
-        self.edge_table = ttk.Treeview(table_frame, columns=columns, show="headings", height=6)
+        self.edge_table = ttk.Treeview(table_frame, columns=columns, show="headings", height=5)
         headings = (("link", "Directed link"), ("distance", "Distance km"), ("flow", "Flow / hour"), ("speed", "Speed km/h"), ("travel", "Travel seconds"))
         for key, label in headings:
             self.edge_table.heading(key, text=label)
@@ -179,7 +221,7 @@ class TrafficRoutingGUI(tk.Tk):
         scrollbar.pack(side="right", fill="y")
         ttk.Label(
             tab,
-            text="A* route costs use travel time derived from the selected model. The CSV road network must contain verified directed links.",
+            text="Edge costs are travel times derived from the selected model's predicted flow. Only A* guarantees the fastest route; the table lists up to 5 loopless routes found with Yen's algorithm.",
             style="Subtitle.TLabel",
             wraplength=850,
         ).pack(anchor="w", pady=(10, 0))
@@ -233,9 +275,11 @@ class TrafficRoutingGUI(tk.Tk):
             origin = int(self.origin_var.get().strip())
             destination = int(self.destination_var.get().strip())
             lookback = int(self.route_window.get())
+            k_routes = int(self.k_routes.get())
         except ValueError:
             messagebox.showerror("Invalid input", "Origin, destination, and lookback must be valid integers.")
             return
+        method = LABEL_TO_METHOD.get(self.algorithm.get(), "AS")
         if not Path(self.sites_path.get()).is_file() or not Path(self.links_path.get()).is_file():
             messagebox.showerror(
                 "Road network files not found",
@@ -253,7 +297,14 @@ class TrafficRoutingGUI(tk.Tk):
             self.flow_source.get(),
             self.speed_branch.get(),
         )
-        self._start_job("route", lambda: run_tbrgs(*args))
+        # Read every Tk variable here: Tkinter must only be touched from the main thread.
+        options = dict(
+            k_routes=k_routes,
+            oversaturation_policy=self.oversaturation.get(),
+            skip_unavailable_sites=self.skip_unavailable.get(),
+            search_method=method,
+        )
+        self._start_job("route", lambda: (method, run_tbrgs(*args, **options)))
 
     def _drain_events(self) -> None:
         try:
@@ -266,13 +317,22 @@ class TrafficRoutingGUI(tk.Tk):
                     )
                     self.status_var.set("Prediction complete")
                 elif operation == "route":
-                    result, estimates, config = value
+                    method, (result, routes, estimates, config, skipped) = value
+                    name = ALGORITHM_LABELS.get(method, method)
                     if result.goal is None:
                         self.route_summary.set("No route found between the selected sites.")
                     else:
                         path = " → ".join(map(str, result.path))
                         self.route_summary.set(
-                            f"Route: {path}\nEstimated time: {result.path_cost / 60:.2f} minutes ({result.path_cost:.1f} seconds) · A* created {result.nodes_created} nodes · {len(estimates)} predicted links · flow={config.flow_source}, speed={config.speed_branch}"
+                            f"{name} route: {path}\nEstimated time: {result.path_cost / 60:.2f} minutes ({result.path_cost:.1f} seconds) · {result.nodes_created} nodes created · {len(estimates)} predicted links · flow={config.flow_source}, speed={config.speed_branch}"
+                            + (f"\nSkipped sites without history: {', '.join(map(str, skipped))}" if skipped else "")
+                        )
+                    for item in self.routes_table.get_children():
+                        self.routes_table.delete(item)
+                    for rank, route in enumerate(routes, start=1):
+                        self.routes_table.insert(
+                            "", "end",
+                            values=(rank, " → ".join(map(str, route.nodes)), f"{route.travel_time_minutes:.2f}"),
                         )
                     for item in self.edge_table.get_children():
                         self.edge_table.delete(item)

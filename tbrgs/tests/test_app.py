@@ -111,6 +111,41 @@ class IntegratedApplicationTests(unittest.TestCase):
         self.assertEqual(result.path[0], 2000)
         self.assertEqual(result.path[-1], 3002)
 
+    def _run_with_method(self, method):
+        def fake_prediction(site_id, prediction_time, *, model_name, lookback):
+            return TrafficPrediction(
+                scats_id=site_id,
+                predicted_flow=100.0,
+                unit="vehicles_per_15_minutes",
+                model_name=model_name,
+                prediction_time=prediction_time,
+            )
+
+        with patch("tbrgs.app.predict_traffic", side_effect=fake_prediction):
+            return run_tbrgs(
+                2000, 3002, "2006-10-29 04:00", "LSTM", 4,
+                self.sites_csv, self.links_csv, search_method=method,
+            )
+
+    def test_every_a2a_search_method_finds_a_valid_route(self):
+        for method in ("DFS", "BFS", "GBFS", "AS", "CUS1", "CUS2"):
+            with self.subTest(method=method):
+                result, routes, _, _, _ = self._run_with_method(method)
+                self.assertEqual(result.path[0], 2000)
+                self.assertEqual(result.path[-1], 3002)
+                # A non-optimal search can never beat Yen's fastest route.
+                self.assertGreaterEqual(
+                    result.path_cost + 1e-6, routes[0].travel_time_seconds
+                )
+
+    def test_search_method_is_case_insensitive(self):
+        result, routes, _, _, _ = self._run_with_method("as")
+        self.assertAlmostEqual(result.path_cost, routes[0].travel_time_seconds)
+
+    def test_unknown_search_method_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "Unknown search method"):
+            self._run_with_method("DIJKSTRA")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -1,0 +1,15 @@
+{
+  "origin": 2000,
+  "destination": 3002,
+  "prediction_time": "2006-10-30 08:00",
+  "model": "LSTM",
+  "lookback": 8,
+  "search_method": "AS",
+  "k_routes": 5,
+  "flow_source": "destination",
+  "speed_branch": "free_flow",
+  "oversaturation_policy": "clamp",
+  "skip_unavailable_sites": true,
+  "sites_csv": "data/tbrgs/scats_sites.csv",
+  "links_csv": "data/tbrgs/road_links.csv"
+}

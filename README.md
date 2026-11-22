@@ -1,73 +1,316 @@
-# Assignment 2B: Traffic Prediction and Route Guidance
+# COS30019 – Introduction to Artificial Intelligence
+## Assignment 2 Part B: Traffic-Based Route Guidance System (TBRGS)
 
-This repository combines the Assignment 2A search algorithms with the Assignment 2B traffic-prediction and route-guidance pipeline.
+This project predicts traffic flow at SCATS intersections in the City of Boroondara using machine-learning models, converts the predicted flow into travel time, and uses the Assignment 2A search algorithms to find up to five routes between any two SCATS sites. It includes a desktop GUI and a command-line interface.
 
-## Traffic data and models
+## Team Members
 
-The original October 2006 SCATS workbook is preserved under `data/raw/`. The processed dataset is stored in `data/processed/scats_traffic_clean.csv`, with one record per SCATS site and 15-minute interval. Shared chronological train/validation/test sequences are prepared for lookbacks of 4, 8, and 12 observations.
+| Name | Student ID |
+| --- | --- |
+| Darren Chong Khai Chen | 104406534 |
+| Shiaw Chwen Heng | 102781527 |
+| Benson Kiing Xie Yew | 104405845 |
 
-The required model comparison is **LSTM, GRU, and Random Forest Regressor**. The existing **BiLSTM** is retained as an additional team model. A Decision Tree regressor remains an optional baseline and is not a substitute for Random Forest.
+## Contents
+
+1. [Quick start](#quick-start)
+2. [Setup](#setup)
+3. [Desktop GUI](#desktop-gui)
+4. [Command-line route search](#command-line-route-search)
+5. [Traffic data and preprocessing](#traffic-data-and-preprocessing)
+6. [Machine-learning models](#machine-learning-models)
+7. [Road network](#road-network)
+8. [Travel-time conversion](#travel-time-conversion)
+9. [Assignment 2A search algorithms](#assignment-2a-search-algorithms)
+10. [Configuration file](#configuration-file)
+11. [Testing](#testing)
+12. [Known limitations and assumptions](#known-limitations-and-assumptions)
+13. [Project files](#project-files)
+
+## Quick start
+
+From the repository root:
+
+```sh
+python -m pip install -r requirements.txt     # plus TensorFlow for LSTM/GRU/BiLSTM
+python -m tbrgs.gui                            # open the GUI
+```
+
+Or run the brief's example trip (SCATS 2000 → 3002) from the command line:
+
+```sh
+python -m tbrgs.app 2000 3002 "2006-10-30 08:00" --model LSTM --oversaturation-policy clamp --skip-unavailable-sites
+```
+
+Expected output (top route): `2000 -> 4043 -> 4040 -> 3120 -> 4035 -> 3002`, about 20.75 minutes, followed by four alternative routes.
 
 ## Setup
 
 Install the base dependencies (including `xlrd` for the original `.xls` workbook):
 
-```powershell
+```sh
 python -m pip install -r requirements.txt
 ```
 
-LSTM, GRU and BiLSTM training/inference additionally require TensorFlow in a Python version supported by the TensorFlow release. Use a separate compatible environment if your current Python version is not supported. Random Forest does not require TensorFlow.
+LSTM, GRU and BiLSTM need TensorFlow, installed from `requirements-gru.txt` in a Python version that TensorFlow supports. Use a separate environment if your current Python version is not supported. Random Forest uses scikit-learn and joblib only and does not need TensorFlow.
 
-## Prepare data and train models
+The Random Forest model files (`*.joblib`) are stored with **Git LFS**. After cloning, download them with:
 
-If the processed data and sequence files already exist, do not regenerate them unnecessarily. To reproduce preprocessing and shared sequence creation:
-
-```powershell
-python -m ml.preprocess
-python -m ml.dataset
+```sh
+git lfs install
+git lfs pull
 ```
 
-Train the neural models (TensorFlow environment required):
-
-```powershell
-python -m ml.train_all_models
-```
-
-Train Random Forest separately so its artifacts do not overwrite neural-model results:
-
-```powershell
-python -m ml.train_random_forest --lookbacks 4 8 12 --n-estimators 50 --max-depth 16 --n-jobs -1
-```
-
-Random Forest artifacts and evaluation results are written to `models/random_forest/`.
-
-## Tests
-
-Run from the repository root:
-
-```powershell
-python -m unittest -v test_models
-python -m unittest discover -s ml/tests -v
-python -m unittest discover -s tbrgs/tests -v
-python verify_project.py
-```
-
-The neural inference test requires TensorFlow; the raw `.xls` loading test requires `xlrd`.
+Without this step the `.joblib` files are small text pointers and Random Forest fails to load.
 
 ## Desktop GUI
-
-Start the graphical application from the repository root after installing dependencies and training the selected model:
 
 ```sh
 python -m tbrgs.gui
 ```
 
-The **Traffic forecast** tab predicts one site's next 15-minute flow. The **Route planner** tab runs the A2A A* integration and displays the selected route and estimated directed-link travel times. Route planning requires populated, verified `scats_sites.csv` and `road_links.csv` files; the GUI does not create a road network from the empty templates. The interface uses Python's built-in Tkinter library.
+The GUI uses Python's built-in Tkinter library and has two tabs.
 
-## Assignment 2A route integration
+**Traffic forecast** – enter a SCATS site, a prediction time, the model and the lookback window, and the GUI predicts that site's flow for the next 15 minutes.
 
-`python -m tbrgs.app` runs Assignment 2A A* using traffic-predicted travel-time edge costs and also calculates up to five distinct loopless alternatives using Yen's algorithm. The SCATS node list `data/tbrgs/scats_sites.csv` is populated with the 40 SCATS IDs and descriptions from the supplied VicRoads site listing. The directed road-link file `data/tbrgs/road_links.csv` still needs verified road connections, measured distances and controlled-intersection counts before a real route can be run.
+**Route planner** – enter:
 
-The traffic-count location catalogue is retained in `data/raw/` for reference, but it does not contain an explicit SCATS-ID field and is not used to invent node coordinates or road links. See [README_TBRGS.md](README_TBRGS.md) and [docs/INTEGRATION_HANDOFF.md](docs/INTEGRATION_HANDOFF.md).
+- origin and destination SCATS IDs (e.g. 2000 and 3002)
+- prediction time (on a 15-minute boundary)
+- ML model: LSTM, GRU, BiLSTM or RandomForest, and the lookback (4, 8 or 12 × 15 minutes)
+- search algorithm: A*, GBFS, BFS, DFS, CUS1 or CUS2
+- number of routes to show (1–5)
+- flow source, speed-curve branch, what to do above capacity, and whether to skip sites with no history at that time
 
-The A2A command line remains `python search.py <filename> <method>`.
+It shows the selected algorithm's route and travel time, a table of up to five routes ranked by travel time (Yen's algorithm), and the predicted flow, speed and travel time of every road link. Only A* is guaranteed to return the fastest route.
+
+All starting values come from [`config.json`](#configuration-file).
+
+## Command-line route search
+
+```sh
+python -m tbrgs.app <origin> <destination> "<prediction time>" [options]
+```
+
+| Option | Values (default) | Meaning |
+| --- | --- | --- |
+| `--model` | `LSTM`, `GRU`, `BiLSTM`, `RandomForest` (`GRU`) | Model used to predict flow |
+| `--lookback` | `4`, `8`, `12` (`8`) | Number of past 15-minute readings fed to the model |
+| `--method` | `AS`, `GBFS`, `BFS`, `DFS`, `CUS1`, `CUS2` (`AS`) | Assignment 2A search algorithm |
+| `--k-routes` | integer ≥ 1 (`5`) | Maximum number of alternative routes |
+| `--flow-source` | `origin`, `destination` (`destination`) | Which end of a link supplies its flow |
+| `--speed-branch` | `free_flow`, `congested` (`free_flow`) | Branch of the flow-speed curve |
+| `--oversaturation-policy` | `raise`, `clamp` (`raise`) | Stop, or cap flow at capacity, when flow exceeds 1500 veh/h |
+| `--skip-unavailable-sites` | flag | Drop sites with no history at that time, with their links |
+| `--sites`, `--links` | CSV paths | Road-network files (defaults under `data/tbrgs/`) |
+
+The A* result is checked against Yen's best route; the two must agree on the shortest travel time.
+
+## Traffic data and preprocessing
+
+- Source: `data/raw/Scats Data October 2006.xls` (VicRoads SCATS data, October 2006). Do not edit this file.
+- Processed data: `data/processed/scats_traffic_clean.csv`, one row per SCATS site and 15-minute interval, with columns `scats_id,timestamp,traffic_flow`.
+- Sequences: shared chronological train/validation/test sequences for lookbacks of 4, 8 and 12 readings (1, 2 and 3 hours) and the scaler parameters are under `data/processed/`. The scaler is fitted on training data only.
+- Sequence windows are built separately for each SCATS site and never cross a missing 15-minute interval.
+- A location-level variant (per detector approach) is under `data/processed/location_level/`.
+
+To regenerate (only when necessary):
+
+```sh
+python -m ml.preprocess
+python -m ml.dataset
+```
+
+## Machine-learning models
+
+| Model | Type | Saved under |
+| --- | --- | --- |
+| **LSTM** | Recurrent neural network (required) | `models/lstm/` |
+| **GRU** | Recurrent neural network (required) | `models/gru/` |
+| **Random Forest Regressor** | Tree ensemble (team's chosen third algorithm) | `models/random_forest/` |
+| **BiLSTM** | Bidirectional LSTM (additional model) | `models/bilstm/` |
+
+All models use the same splits and predict the next 15-minute flow.
+
+### Training
+
+Neural models (TensorFlow required):
+
+```sh
+python -m ml.train_all_models
+```
+
+Random Forest, which writes only to `models/random_forest/` and does not overwrite the neural-model results:
+
+```sh
+python -m ml.train_random_forest --lookbacks 4 8 12 --n-estimators 50 --max-depth 16 --n-jobs -1
+```
+
+Quick smoke test before full training:
+
+```sh
+python -m ml.train_random_forest --lookbacks 4 --n-estimators 5 --max-depth 16 --n-jobs 1
+```
+
+### Evaluation
+
+All models are compared on the same held-out timestamps using MAE, MSE, RMSE, R² and NRMSE (RMSE divided by the range of the actual values). Predictions are converted back to vehicles per 15 minutes before scoring. Results are in `models/evaluation_results.csv` (neural models) and `models/random_forest/evaluation_results.csv`.
+
+Test-set results (vehicles per 15 minutes, lookback 12):
+
+| Model | MAE | RMSE | R² |
+| --- | --- | --- | --- |
+| Random Forest | 26.6 | 39.6 | 0.979 |
+| LSTM | 31.1 | 46.1 | 0.971 |
+| BiLSTM | 45.9 | 66.1 | 0.941 |
+| GRU | 56.5 | 70.8 | 0.932 |
+
+## Road network
+
+The route planner needs two files:
+
+| File | Columns |
+| --- | --- |
+| `data/tbrgs/scats_sites.csv` | `scats_id,site_name,latitude,longitude` |
+| `data/tbrgs/road_links.csv` | `from_scats,to_scats,distance_km,controlled_intersections` |
+
+Both are generated by:
+
+```sh
+python -m tbrgs.build_road_network
+```
+
+- **Sites:** the 40 SCATS sites in the dataset. Each site's position is the mean of its detector coordinates in the October 2006 workbook.
+- **Links:** each SCATS site is a signalised intersection of named roads. The script lists the sites along each road in order (e.g. Burke Rd: 2825 → 4030 → 4032 → 4034 → 4035 → 3120 → 4040 → 4043) and links neighbouring sites in both directions. This gives 114 directed links, with all 40 sites connected.
+- **Distance:** straight-line (haversine) distance between the two sites.
+- **Controlled intersections:** 1 per link, for the signalised SCATS site at the end of the link.
+
+To change the network, edit `ROAD_SEGMENTS` in `tbrgs/build_road_network.py` and rerun the script.
+
+## Travel-time conversion
+
+From the supplied `docs/Traffic_Flow_to_Travel_Time_Conversion_v1.0.pdf`:
+
+```text
+flow = -1.4648375 * speed^2 + 93.75 * speed
+```
+
+1. The model predicts vehicles per 15 minutes; this is multiplied by 4 to get vehicles per hour.
+2. The curve is solved for speed, capped at the 60 km/h speed limit.
+3. Link travel time = distance ÷ speed, in seconds, plus 30 seconds per controlled intersection.
+
+The capacity is about 1500 vehicles/hour at 32 km/h. Above it, `raise` stops with an error and `clamp` treats the flow as exactly at capacity (32 km/h).
+
+## Assignment 2A search algorithms
+
+| Command | Algorithm | Type | Search objective |
+| --- | --- | --- | --- |
+| `DFS` | Depth-First Search | Uninformed | Find a valid path |
+| `BFS` | Breadth-First Search | Uninformed | Find a path with the fewest moves |
+| `GBFS` | Greedy Best-First Search | Informed | Use heuristic guidance to find a path |
+| `AS` | A* Search | Informed | Find a path with minimum weighted cost |
+| `CUS1` | Iterative Deepening Depth-First Search (IDDFS) | Custom, uninformed | Find a path with the fewest moves |
+| `CUS2` | Iterative Deepening A* (IDA*) | Custom, informed | Find a path with the fewest moves using a heuristic |
+
+The original Part A command line still works on its own graph files:
+
+```sh
+python search.py <filename> <method>
+python search.py test_case/PathFinder-test-1.txt AS
+```
+
+Graph files have four sections (edges are directed):
+
+```text
+Nodes:
+1: (0,0)
+2: (1,0)
+3: (2,0)
+Edges:
+(1,2): 4
+(2,3): 5
+Origin:
+1
+Destinations:
+3
+```
+
+## Configuration file
+
+`config.json` in the repository root sets the GUI's starting values:
+
+```json
+{
+  "origin": 2000,
+  "destination": 3002,
+  "prediction_time": "2006-10-30 08:00",
+  "model": "LSTM",
+  "lookback": 8,
+  "search_method": "AS",
+  "k_routes": 5,
+  "flow_source": "destination",
+  "speed_branch": "free_flow",
+  "oversaturation_policy": "clamp",
+  "skip_unavailable_sites": true,
+  "sites_csv": "data/tbrgs/scats_sites.csv",
+  "links_csv": "data/tbrgs/road_links.csv"
+}
+```
+
+Any key left out uses the built-in default in `tbrgs/config.py`. An unknown key or invalid JSON is reported as an error.
+
+## Testing
+
+Run from the repository root:
+
+```sh
+python -m unittest -v test_models                    # model classes
+python -m unittest discover -s ml/tests -v           # data pipeline and predictions
+python -m unittest discover -s tbrgs/tests -v        # travel time, road network, routes, config
+python test_member3.py                               # CUS1/CUS2 on testcase12–16
+python verify_project.py                             # all six Part A algorithms on 17 graph files
+```
+
+| Suite | What it covers |
+| --- | --- |
+| `test_models.py` | Model construction, training and prediction shapes |
+| `ml/tests/` | Preprocessing, sequence creation, prediction interface and invalid inputs |
+| `tbrgs/tests/test_tbrgs.py` | Flow-to-speed conversion, travel time, graph validation, Yen's routes |
+| `tbrgs/tests/test_app.py` | End-to-end route search with every Part A algorithm |
+| `tbrgs/tests/test_road_network.py` | Generated network: coordinates, connectivity, reverse links, distances |
+| `tbrgs/tests/test_config_defaults.py` | Loading `config.json` |
+| `test_member3.py`, `verify_project.py` | Part A algorithms on the 17 graph test cases |
+
+The neural inference test requires TensorFlow; the raw `.xls` loading test requires `xlrd`.
+
+## Known limitations and assumptions
+
+- **Road links are approximate.** Connectivity comes from the road names at each SCATS site and should be checked against a map. Distances are straight-line, not measured road lengths.
+- **Data gaps.** Some sites are missing days of data (e.g. 3001 has only 2–3 Oct; 3002 has no data 24–28 Oct). Use `--skip-unavailable-sites` (on by default in the GUI) to leave them out for that time. The origin and destination must still have history.
+- **Capacity.** Most daytime SCATS site flows exceed the guide's 1500 vehicles/hour, because a site's count includes every approach of the intersection. The GUI default caps flow at capacity (`clamp`); the command line stops by default (`raise`).
+- **Flow source.** The conversion guide uses the flow at the start of a link; another brief note says the destination. The default is `destination`; choose with `--flow-source`.
+- **Coordinates.** The brief notes that SCATS coordinates are slightly offset from real map positions. The offset is similar for all sites, so relative distances are still usable.
+
+## Project files
+
+| File or folder | Purpose |
+| --- | --- |
+| `tbrgs/gui.py` | Desktop GUI |
+| `tbrgs/app.py` | Integration: predict flow → travel time → search → top-5 routes; command line |
+| `tbrgs/config.py` | Travel-time settings and loader for `config.json` |
+| `tbrgs/travel_time.py` | Flow-to-speed curve and link travel time |
+| `tbrgs/road_graph.py` | Loads and validates the road-network CSV files |
+| `tbrgs/top_k_routes.py` | Yen's algorithm for up to K loopless routes |
+| `tbrgs/build_road_network.py` | Generates `scats_sites.csv` and `road_links.csv` |
+| `config.json` | GUI defaults |
+| `ml/preprocess.py`, `ml/dataset.py` | Data cleaning and sequence creation |
+| `ml/train_all_models.py`, `ml/train_lstm.py`, `ml/train_random_forest.py` | Model training |
+| `ml/predict_model.py` | Prediction interface used by the route planner |
+| `models.py` | Model definitions |
+| `models/` | Trained models, evaluation results, predictions and graphs |
+| `search.py` | Part A command-line entry point and algorithm selection |
+| `route_problem.py` | Part A graph, search nodes and results |
+| `basic_search.py`, `inform_search.py`, `custom_search.py` | Part A search algorithms |
+| `test_case/` | Part A graph test cases |
+| `data/raw/`, `data/processed/`, `data/tbrgs/` | Raw, processed and road-network data |
+| `docs/` | Travel-time conversion guide and integration handoff notes |
