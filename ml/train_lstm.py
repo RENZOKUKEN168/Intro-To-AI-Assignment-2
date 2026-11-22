@@ -1,4 +1,4 @@
-
+import math 
 from pathlib import Path
 import numpy as np
 import pandas as pd
@@ -94,9 +94,9 @@ def evaluate_model(model, X, y, params, name):
     r2 = r2_score(actual, predicted)
 
     print(f"\n{name} Evaluation:")
-    print(f"MAE: {mae:.4f} vehicles/15 min")
-    print(f"RMSE: {rmse:.4f} vehicles/15 min")
-    print(f"R2 Score: {r2:.4f}")
+    print(f"MAE: {math.ceil(mae)} vehicles/15 min")
+    print(f"RMSE: {math.ceil(rmse)} vehicles/15 min")
+    print(f"R2 Score: {r2:.0%}")
 
     return {
         "dataset": name,
@@ -129,9 +129,11 @@ def main():
 
     callbacks = [
         tf.keras.callbacks.EarlyStopping(
-            monitor="val_loss",
-            patience=5,
-            restore_best_weights=True
+        monitor="val_loss",
+        min_delta=0.00001,
+        patience=5,
+        restore_best_weights=True,
+        verbose=1
         )
     ]
 
